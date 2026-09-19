@@ -10,14 +10,28 @@ const APPS_SCRIPT_URL = process.env.VITE_APPS_SCRIPT_URL || "https://script.goog
 export async function submitRegistration(eventId, registrationData) {
   if (!db) throw new Error("Firestore database is not initialized.");
 
-  // Fetch event to check limits
-  const eventDoc = await db.collection("events").doc(eventId).get();
-  if (!eventDoc.exists) throw new Error("Event not found");
-  const event = eventDoc.data();
+  // The frontend passes the URL slug (e.g. "Director's_Cut") instead of the true ID (e.g. "EVT050").
+  // We must resolve the true document ID first.
+  let trueEventId = eventId;
+  let event = null;
+
+  const doc = await db.collection("events").doc(eventId).get();
+  if (doc.exists) {
+    event = doc.data();
+  } else {
+    // Fallback: search by eventName
+    const decodedSearch = decodeURIComponent(eventId).replace(/_/g, " ").toLowerCase();
+    const snapshot = await db.collection("events").get();
+    const foundDoc = snapshot.docs.find(d => String(d.data().eventName).toLowerCase() === decodedSearch);
+    if (!foundDoc) throw new Error("Event not found");
+    event = foundDoc.data();
+    trueEventId = foundDoc.id;
+  }
+
   const registrationLimit = event.registrationLimit ? parseInt(event.registrationLimit) : null;
 
   // Check current registration count
-  const regSnapshot = await db.collection("registrations").where("eventId", "==", String(eventId)).get();
+  const regSnapshot = await db.collection("registrations").where("eventId", "==", String(trueEventId)).get();
   const currentCount = regSnapshot.size;
 
   if (registrationLimit && currentCount >= registrationLimit) {
@@ -28,26 +42,26 @@ export async function submitRegistration(eventId, registrationData) {
   const registrationRef = db.collection("registrations").doc();
   const entry = {
     ...registrationData,
-    eventId: String(eventId),
+    eventId: String(trueEventId),
     createdAt: new Date().toISOString()
   };
   await registrationRef.set(entry);
-  
+
   // Dual-sync to Google Sheets in background
   fetch(APPS_SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "submit", id: eventId, ...registrationData })
+    body: JSON.stringify({ action: "submit", id: trueEventId, ...registrationData })
   })
-  .then(res => res.json())
-  .then(data => {
-    if (data.error) console.error(`[Dual-Sync Error] Registration sync failed for event ${eventId}:`, data.error);
-  })
-  .catch(err => console.error(`[Dual-Sync Error] Failed to sync registration for event ${eventId}:`, err.message));
+    .then(res => res.json())
+    .then(data => {
+      if (data.error) console.error(`[Dual-Sync Error] Registration sync failed for event ${trueEventId}:`, data.error);
+    })
+    .catch(err => console.error(`[Dual-Sync Error] Failed to sync registration for event ${trueEventId}:`, err.message));
 
-  return { 
-    success: true, 
-    message: "Registration submitted successfully", 
+  return {
+    success: true,
+    message: "Registration submitted successfully",
     registrationId: registrationRef.id,
     registrationCount: currentCount + 1,
     limit: registrationLimit || null
@@ -62,7 +76,7 @@ export async function getEventCounts() {
   // and group them in memory. This bypasses the Google Sheets bottleneck entirely.
   const snapshot = await db.collection("registrations").get();
   const counts = {};
-  
+
   snapshot.forEach(doc => {
     const data = doc.data();
     if (data.eventId) {
