@@ -34,13 +34,25 @@ async function getAllEvents(activeOnly = false) {
   return events;
 }
 
-async function getEvent(eventId) {
+async function getEvent(identifier) {
   if (!db) throw new Error("Firestore database is not initialized.");
 
-  const doc = await db.collection("events").doc(eventId).get();
-  if (!doc.exists) throw new Error("Event not found");
+  // Try direct ID lookup first
+  const doc = await db.collection("events").doc(identifier).get();
+  if (doc.exists) return doc.data();
 
-  return doc.data();
+  // Try eventName lookup (frontend uses /event/Event_Name)
+  const decodedSearch = decodeURIComponent(identifier).replace(/_/g, " ").toLowerCase();
+  const snapshot = await db.collection("events").get();
+
+  const foundDoc = snapshot.docs.find(d => {
+    const data = d.data();
+    return String(data.eventName).toLowerCase() === decodedSearch;
+  });
+
+  if (!foundDoc) throw new Error("Event not found");
+
+  return foundDoc.data();
 }
 
 async function toggleEvent(eventId) {
