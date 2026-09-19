@@ -6,8 +6,9 @@ import { auth, db } from "./firebase.js";
  */
 export async function verifyAuth(req, res, next) {
   const authHeader = req.headers.authorization;
-
+  
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.warn(`[verifyAuth] Missing or invalid auth header on ${req.method} ${req.url}:`, authHeader);
     req.user = null;
     return next();
   }
@@ -43,7 +44,7 @@ export async function verifyAuth(req, res, next) {
     req.user = userProfile;
     next();
   } catch (error) {
-    console.error("Error verifying Firebase auth token:", error.message);
+    console.error("Error verifying Firebase auth token:", error.message, error);
     req.user = null;
     next();
   }

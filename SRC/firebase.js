@@ -22,11 +22,17 @@ try {
       });
       console.log("Firebase Admin initialized using firebase-service-account.json");
     } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+      let rawKey = process.env.FIREBASE_PRIVATE_KEY;
+      if (rawKey.startsWith('"') && rawKey.endsWith('"')) {
+        rawKey = rawKey.slice(1, -1);
+      } else if (rawKey.startsWith("'") && rawKey.endsWith("'")) {
+        rawKey = rawKey.slice(1, -1);
+      }
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID,
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+          privateKey: rawKey.replace(/\\n/g, "\n"),
         }),
       });
       console.log("Firebase Admin initialized using environment variables.");

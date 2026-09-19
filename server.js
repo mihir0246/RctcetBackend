@@ -9,6 +9,9 @@ import { readSaaFine, appendSaaFine, updateSaaFine, deleteSaaFine } from "./SRC/
 import { readContactUs, appendDataContactUs } from "./SRC/ContactUs.js";
 import { readEventsDrive } from "./SRC/EventsDrive.js";
 import { appendFeedBack } from "./SRC/FeedBack.js";
+import { getAllEvents, getEvent, toggleEvent, deleteEvent, createEvent, editEvent } from "./SRC/Events.js";
+import { getAllUsers, assignPosition } from "./SRC/Roles.js";
+import { submitRegistration, getEventCounts } from "./SRC/Registrations.js";
 
 dotenv.config();
 
@@ -23,12 +26,7 @@ app.use(verifyAuth);
 
 // Base Health Endpoint
 app.get("/", (req, res) => {
-  res.json({
-    status: "online",
-    service: "RCTCET Backend API",
-    rbac: "Strict Privilege Boundaries Enforced",
-    dualSyncBackup: db ? "Firestore Active" : "Google Sheets Standalone",
-  });
+  res.send("Hello! The RC TCET website has been developed by Rtr. Fuzail and Rtr. Mihir for RI Year 2026-27!");
 });
 
 /* -------------------------------------------------------------------------- */
@@ -45,49 +43,45 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
   });
 });
 
-/**
- * POST /api/admin/assign-position
- * Master Admin route (Strictly PRESIDENT only) to set position & rotate assigned avenues
- */
+/* -------------------------------------------------------------------------- */
+/*                         ROLE MANAGEMENT (PRESIDENT ONLY)                   */
+/* -------------------------------------------------------------------------- */
+
+// ADMIN: Get current user profile
+app.get("/api/admin/me", requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
+// ADMIN: Get all users
+app.get(
+  "/api/admin/users",
+  requirePermission({ isMasterAdminOnly: true }),
+  async (req, res) => {
+    try {
+      const users = await getAllUsers();
+      res.json(users);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ error: "Failed to fetch users." });
+    }
+  }
+);
+
+// ADMIN: Assign position
 app.post(
   "/api/admin/assign-position",
   requirePermission({ isMasterAdminOnly: true }),
   async (req, res) => {
-    const { targetUid, targetEmail, position, termYear, assignedAvenues } = req.body;
-
-    if (!targetUid && !targetEmail) {
-      return res.status(400).json({ error: "targetUid or targetEmail is required." });
-    }
-
     try {
-      let uid = targetUid;
-
-      if (!uid && targetEmail && firebaseAuth) {
-        const userRecord = await firebaseAuth.getUserByEmail(targetEmail);
-        uid = userRecord.uid;
+      const { targetUid, newPosition, roles } = req.body;
+      if (!targetUid || !newPosition) {
+        return res.status(400).json({ error: "Missing required fields" });
       }
-
-      if (!uid || !db) {
-        return res.status(400).json({ error: "Unable to locate user or Firestore unavailable." });
-      }
-
-      const updateData = {
-        position: position || "GBM",
-        termYear: termYear || "2025-2026",
-        assignedAvenues: Array.isArray(assignedAvenues) ? assignedAvenues : [],
-        updatedAt: new Date().toISOString(),
-        updatedBy: req.user.email,
-      };
-
-      await db.collection("users").doc(uid).set(updateData, { merge: true });
-
-      res.json({
-        message: `Successfully assigned position '${position}' and avenues to user ${targetEmail || uid}`,
-        user: updateData,
-      });
-    } catch (err) {
-      console.error("Error setting user position:", err);
-      res.status(500).json({ error: "Failed to update user position and avenues." });
+      const result = await assignPosition(targetUid, newPosition, roles);
+      res.json(result);
+    } catch (error) {
+      console.error("Error assigning position:", error);
+      res.status(500).json({ error: "Failed to assign position." });
     }
   }
 );
@@ -265,6 +259,180 @@ app.post("/addContactUs", async (req, res) => {
     res.status(500).json({ error: "Failed to append ContactUs data." });
   }
 });
+
+/* -------------------------------------------------------------------------- */
+/*                         EVENTS MANAGEMENT (APPS SCRIPT PORT)               */
+/* -------------------------------------------------------------------------- */
+
+// PUBLIC: Get all active, future events
+app.get("/api/events", async (req, res) => {
+  try {
+    const events = await getAllEvents(true);
+    res.json(events);
+  } catch (error) {
+    console.error("Error fetching public events:", error);
+    res.status(500).json({ error: "Failed to fetch events." });
+  }
+});
+
+// PUBLIC: Get a single event by ID
+app.get("/api/events/:id", async (req, res) => {
+  try {
+    const event = await getEvent(req.params.id);
+    res.json(event);
+  } catch (error) {
+    if (error.message === "Event not found") {
+      return res.status(404).json({ error: "Event not found" });
+    }
+    console.error("Error fetching event:", error);
+    res.status(500).json({ error: "Failed to fetch event." });
+  }
+});
+
+// ADMIN: Get all events (including inactive & past)
+app.get(
+  "/api/admin/events",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  async (req, res) => {
+    try {
+      const events = await getAllEvents(false);
+      res.json(events);
+    } catch (error) {
+      console.error("Error fetching admin events:", error);
+      res.status(500).json({ error: "Failed to fetch events." });
+    }
+  }
+);
+
+// ADMIN: Toggle Event Active Status
+app.post(
+  "/api/admin/events/:id/toggle",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  async (req, res) => {
+    try {
+      const result = await toggleEvent(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error toggling event:", error);
+      res.status(500).json({ error: "Failed to toggle event status." });
+    }
+  }
+);
+
+// ADMIN: Delete (Deactivate) Event
+app.delete(
+  "/api/admin/events/:id",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  async (req, res) => {
+    try {
+      const result = await deleteEvent(req.params.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Error deleting event:", error);
+      res.status(500).json({ error: "Failed to delete event." });
+    }
+  }
+);
+
+// ADMIN: Get Event Registration Counts
+app.get(
+  "/api/admin/events/counts",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  async (req, res) => {
+    try {
+      const counts = await getEventCounts();
+      res.json(counts);
+    } catch (error) {
+      console.error("Error fetching event counts:", error);
+      res.status(500).json({ error: "Failed to fetch event counts." });
+    }
+  }
+);
+
+// ADMIN: Create Event (Dual-Sync to Firestore & Apps Script)
+app.post(
+  "/api/admin/events",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  async (req, res) => {
+    try {
+      const data = await createEvent(req.body);
+      res.json(data);
+    } catch (error) {
+      console.error("Error creating event:", error);
+      res.status(500).json({ error: "Failed to create event." });
+    }
+  }
+);
+
+// ADMIN: Edit Event (Dual-Sync to Firestore & Apps Script)
+app.put(
+  "/api/admin/events/:id",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  async (req, res) => {
+    try {
+      const data = await editEvent(req.params.id, req.body);
+      res.json(data);
+    } catch (error) {
+      console.error("Error editing event:", error);
+      res.status(500).json({ error: "Failed to edit event." });
+    }
+  }
+);
+
+// PUBLIC: Submit Event Registration (Dual-Sync to Firestore & Apps Script)
+app.post("/api/events/:id/register", async (req, res) => {
+  try {
+    const data = await submitRegistration(req.params.id, req.body);
+    res.json(data);
+  } catch (error) {
+    console.error("Error submitting registration:", error);
+    res.status(500).json({ error: "Failed to submit registration." });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/*                         ATTENDANCE & MEMBERSHIP                            */
+/* -------------------------------------------------------------------------- */
+
+// PUBLIC: Get members for attendance dropdown
+app.get("/api/attendance/members", async (req, res) => {
+  try {
+    const { getAllUsers } = await import("./SRC/Roles.js");
+    const users = await getAllUsers();
+
+    // Group them for the frontend as homeMembers
+    const homeMembers = users.map(u => ({ name: u.name, email: u.email }));
+
+    res.json({
+      homeMembers: homeMembers,
+      ambassadorials: [],
+      nonRotaractors: []
+    });
+  } catch (error) {
+    console.error("Error fetching members from Firestore:", error);
+    res.status(500).json({ error: "Failed to fetch members." });
+  }
+});
+
+// ADMIN: Submit attendance (Requires POST)
+app.post(
+  "/api/attendance",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT", "SAA"] }),
+  async (req, res) => {
+    try {
+      const response = await fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_MEMBERSHIP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(req.body)
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error("Error submitting attendance:", error);
+      res.status(500).json({ error: "Failed to submit attendance." });
+    }
+  }
+);
 
 /* -------------------------------------------------------------------------- */
 /*                         EVENTS DRIVE & FEEDBACK                            */

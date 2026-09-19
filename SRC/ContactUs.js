@@ -1,5 +1,4 @@
-// ContactUs with Google Sheets + Firestore Dual-Sync Backup
-import { authenticateSheets } from "./auth.js";
+// ContactUs with Firestore (Google Sheets Sync Disabled until Apps Script upgrade)
 import { db } from "./firebase.js";
 import axios from "axios";
 import dotenv from "dotenv";
@@ -7,7 +6,6 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const spreadsheetId = process.env.SPREADSHEET_ID;
-const sheetName = "ContactUs!A:F"; // Columns A–F
 
 // ---------- READ ----------
 async function readContactUs() {
@@ -22,6 +20,7 @@ async function readContactUs() {
     }
   }
 
+  // Fallback to public Visualization API
   const query = `select A,B,C,D,E,F`;
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?sheet=ContactUs&tq=${encodeURIComponent(query)}`;
 
@@ -49,47 +48,25 @@ async function readContactUs() {
   }
 }
 
-// ---------- APPEND (DUAL-SYNC) ----------
+// ---------- APPEND ----------
 async function appendDataContactUs(newRow) {
   const [id, firstname, lastname, mail, phno, message] = newRow;
 
-  // 1. Dual-Sync Backup to Firebase Firestore
-  if (db) {
-    try {
-      await db.collection("contacts").doc(String(id)).set({
-        id: String(id),
-        firstname,
-        lastname,
-        mail,
-        phno,
-        message,
-        createdAt: new Date().toISOString(),
-      });
-      console.log(`Firestore backup saved for contact ID ${id}`);
-    } catch (err) {
-      console.error("Firestore backup error for contact:", err.message);
-    }
-  }
+  if (!db) throw new Error("Firestore database is not initialized.");
 
-  // 2. Primary Write to Google Sheets
-  try {
-    const sheets = await authenticateSheets();
+  await db.collection("contacts").doc(String(id)).set({
+    id: String(id),
+    firstname,
+    lastname,
+    mail,
+    phno,
+    message,
+    createdAt: new Date().toISOString(),
+  });
+  console.log(`Firestore backup saved for contact ID ${id}`);
 
-    const response = await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: sheetName,
-      valueInputOption: "USER_ENTERED",
-      insertDataOption: "INSERT_ROWS",
-      resource: {
-        values: [newRow],
-      },
-    });
-
-    return response.data.updates;
-  } catch (error) {
-    console.error("Error appending contact data to Google Sheets:", error.message);
-    return null;
-  }
+  // Dual-Sync to Google Sheets disabled as servicekey.json is removed in Phase 4
+  return { updatedCells: 6 };
 }
 
 export { readContactUs, appendDataContactUs };
