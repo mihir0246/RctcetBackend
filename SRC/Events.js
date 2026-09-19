@@ -45,10 +45,12 @@ async function getEvent(identifier) {
   const decodedSearch = decodeURIComponent(identifier).replace(/_/g, " ").toLowerCase();
   const snapshot = await db.collection("events").get();
 
-  const foundDoc = snapshot.docs.find(d => {
-    const data = d.data();
-    return String(data.eventName).toLowerCase() === decodedSearch;
-  });
+  const matchedDocs = snapshot.docs.filter(d => String(d.data().eventName).toLowerCase() === decodedSearch);
+  if (matchedDocs.length === 0) throw new Error("Event not found");
+
+  // Prefer the active event if there are duplicates with the same name
+  const activeDoc = matchedDocs.find(d => d.data().isActive === true);
+  const foundDoc = activeDoc || matchedDocs[0];
 
   if (!foundDoc) throw new Error("Event not found");
 
@@ -102,7 +104,24 @@ async function deleteEvent(eventId) {
 async function createEvent(eventData) {
   if (!db) throw new Error("Firestore database is not initialized.");
 
-  const eventId = eventData.eventId || `EVT${Date.now()}`;
+  let eventId = eventData.eventId;
+
+  if (!eventId) {
+    const snapshot = await db.collection("events").get();
+    let maxEvtId = 0;
+    snapshot.docs.forEach(doc => {
+      const id = doc.id;
+      if (id.startsWith("EVT") && id.length <= 8) { // To ignore EVT1789850942240 timestamp anomalies
+        const num = parseInt(id.substring(3), 10);
+        if (!isNaN(num) && num > maxEvtId) {
+          maxEvtId = num;
+        }
+      }
+    });
+    const nextId = maxEvtId + 1;
+    eventId = `EVT${String(nextId).padStart(3, '0')}`;
+  }
+
   const docRef = db.collection("events").doc(eventId);
 
   await docRef.set({
