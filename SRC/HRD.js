@@ -27,7 +27,7 @@ export async function getHrdReport() {
       id: doc.id,
       fullName: fullName,
       email: data["Email"] || data["email"] || "",
-      phone: data["Mobile Number"] || data["Phone"] || "",
+      phone: data["Mobile"] || data["Mobile Number"] || data["Phone"] || "",
       category: data["Category"],
       position: data["Position"],
     };
