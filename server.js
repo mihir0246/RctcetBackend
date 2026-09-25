@@ -390,6 +390,34 @@ app.post("/api/events/:id/register", async (req, res) => {
   }
 });
 
+// PUBLIC: Submit Member Registration (Dual-Sync to Firestore & Apps Script)
+app.post("/api/members/register", async (req, res) => {
+  try {
+    const { db } = await import("./SRC/firebase.js");
+    if (!db) throw new Error("Firestore database is not initialized.");
+
+    // 1. Save directly to Firebase (using the collection specific to Web Registrations)
+    const memberRef = db.collection("membersWebRegi").doc();
+    const entry = {
+      ...req.body,
+      createdAt: new Date().toISOString()
+    };
+    await memberRef.set(entry);
+
+    // 2. Dual-sync securely to Google Sheets in background
+    fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_MEMBERSHIP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body)
+    }).catch(err => console.error("[Dual-Sync Error] Failed to sync member registration:", err.message));
+
+    res.json({ success: true, message: "Membership registration submitted successfully." });
+  } catch (error) {
+    console.error("Error submitting member registration:", error);
+    res.status(500).json({ error: "Failed to submit membership registration." });
+  }
+});
+
 /* -------------------------------------------------------------------------- */
 /*                         ATTENDANCE & MEMBERSHIP                            */
 /* -------------------------------------------------------------------------- */
@@ -411,6 +439,111 @@ app.get("/api/attendance/members", async (req, res) => {
   } catch (error) {
     console.error("Error fetching members from Firestore:", error);
     res.status(500).json({ error: "Failed to fetch members." });
+  }
+});
+
+// PUBLIC: Fetch user details by name to pre-fill registration form
+app.post("/api/members/prefill", async (req, res) => {
+  try {
+    const { firstName, lastName, fullName } = req.body;
+
+    let searchFirst = "";
+    let searchLast = "";
+
+    if (fullName) {
+      const parts = fullName.trim().split(" ");
+      searchFirst = parts[0].toLowerCase();
+      searchLast = parts.length > 1 ? parts.slice(1).join(" ").toLowerCase() : "";
+    } else if (firstName && lastName) {
+      searchFirst = firstName.trim().toLowerCase();
+      searchLast = lastName.trim().toLowerCase();
+    } else {
+      return res.status(400).json({ error: "Name is required." });
+    }
+
+    const { db } = await import("./SRC/firebase.js");
+    if (!db) throw new Error("Firestore database is not initialized.");
+
+    // Search in the NEW Web Registrations collection (membersWebRegi)
+    const newRegSnapshot = await db.collection("membersWebRegi").get();
+    for (const doc of newRegSnapshot.docs) {
+      const data = doc.data();
+      const dbFirst = (data.firstName || "").toLowerCase().trim();
+      const dbLast = (data.lastName || "").toLowerCase().trim();
+      const dbFull = `${dbFirst} ${dbLast}`.trim();
+
+      if (
+        (dbFirst === searchFirst && dbLast === searchLast) ||
+        (fullName && dbFull === fullName.trim().toLowerCase())
+      ) {
+        return res.json({ found: true, data }); // Perfect match in new database
+      }
+    }
+
+    // Search in the OLD migrated members collection (members)
+    const oldRegSnapshot = await db.collection("members").get();
+    for (const doc of oldRegSnapshot.docs) {
+      const data = doc.data();
+      // Old sheet uses "First Name" and "Last Name"
+      const oldFirst = (data["First Name"] || data["Name"] || "").toLowerCase().trim();
+      const oldLast = (data["Last Name"] || "").toLowerCase().trim();
+      const oldFull = `${oldFirst} ${oldLast}`.trim();
+
+      // Check if it matches exactly, or if "First Name" contained both (e.g. "Ajay Sharma")
+      if (
+        (oldFirst === searchFirst && oldLast === searchLast) ||
+        (oldFirst === `${searchFirst} ${searchLast}`) ||
+        (fullName && oldFull === fullName.trim().toLowerCase()) ||
+        (fullName && oldFirst === fullName.trim().toLowerCase())
+      ) {
+        // Map old sheet headers to new form camelCase fields
+        const mappedData = {
+          email: data["Email"] || data["email"] || "",
+          personalEmail: data["Personal mail ID"] || "",
+          gsuiteId: data["Gsuite ID"] || "",
+          firstName: data["First Name"] || searchFirst,
+          middleName: data["Middle Name"] || "",
+          lastName: data["Last Name"] || searchLast,
+          dob: data["Date of Birth"] || "",
+          gender: data["Gender"] || "",
+          bloodGroup: data["Blood Group"] || "",
+          phone: data["Mobile Number"] || data["Phone"] || "",
+          year: data["Year"] || "",
+          department: data["Department"] || "",
+          division: data["Division"] || "",
+          rollNumber: data["Roll Number"] || "",
+          addressLine1: data["Residential Address Line 1"] || "",
+          addressLine2: data["Residential Address Line 2"] || "",
+          addressLine3: data["Residential Address Line 3"] || "",
+          pincode: data["Pincode"] || "",
+          city: data["City"] || "",
+          railwayStation: data["Nearby Railway Station"] || "",
+          fatherName: data["Full Name of Father"] || "",
+          fatherAge: data["Age of Father"] || "",
+          fatherOccupation: data["Occupation of Father"] || "",
+          motherName: data["Full Name of Mother"] || "",
+          motherAge: data["Age of Mother"] || "",
+          motherOccupation: data["Occupation of Mother"] || "",
+          parentContact: data["Contact No.of your parent"] || "",
+          hasSiblings: data["Any Siblings?"] || "",
+          siblingCount: data["If yes, How many?"] || "",
+          rotaractYear: data["Rotaract Year"] || "",
+          hobbies: data["Any Hobbies/Skills?"] || "",
+          helpWith: data["You can help us with"] ? data["You can help us with"].split(",") : [],
+          playSports: data["Do you play any sports?"] || "",
+          sportsAchievement: data["Achievement in sports?"] || "",
+          culturalActivities: data["Cultural activities?"] ? data["Cultural activities?"].split(",") : [],
+          culturalAchievement: data["Achievement in cultural?"] || ""
+        };
+        return res.json({ found: true, data: mappedData });
+      }
+    }
+
+    // No match found
+    return res.json({ found: false });
+  } catch (error) {
+    console.error("Error fetching prefill data:", error);
+    res.status(500).json({ error: "Failed to fetch prefill data." });
   }
 });
 

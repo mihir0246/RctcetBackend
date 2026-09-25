@@ -15,7 +15,8 @@
         "firebase": "^12.19.0",
         "firebase-admin": "^13.0.0",
         "google-auth-library": "^10.3.0",
-        "googleapis": "^159.0.0"
+        "googleapis": "^159.0.0",
+        "string-similarity": "^4.0.4"
     },
     "devDependencies": {
         "nodemon": "^3.1.9"
