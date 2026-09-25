@@ -12,6 +12,7 @@ import { appendFeedBack } from "./SRC/FeedBack.js";
 import { getAllEvents, getEvent, toggleEvent, deleteEvent, createEvent, editEvent } from "./SRC/Events.js";
 import { getAllUsers, assignPosition } from "./SRC/Roles.js";
 import { submitRegistration, getEventCounts } from "./SRC/Registrations.js";
+import { getHrdReport } from "./SRC/HRD.js";
 
 dotenv.config();
 
@@ -218,6 +219,25 @@ app.post(
       res.json({ message: "Finance entry recorded successfully", id: docRef.id, entry });
     } catch (err) {
       res.status(500).json({ error: "Failed to record finance entry." });
+    }
+  }
+);
+
+/* -------------------------------------------------------------------------- */
+/*                           HRD DASHBOARD                                    */
+/* -------------------------------------------------------------------------- */
+
+// READ HRD Report (Restricted to CP_HRD, PRESIDENT, etc)
+app.get(
+  "/api/admin/hrd-report",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT", "CP_HRD"] }),
+  async (req, res) => {
+    try {
+      const reportData = await getHrdReport();
+      res.json(reportData);
+    } catch (error) {
+      console.error("Error fetching HRD report:", error);
+      res.status(500).json({ error: "Failed to fetch HRD report." });
     }
   }
 );
@@ -550,10 +570,40 @@ app.post("/api/members/prefill", async (req, res) => {
 // ADMIN: Submit attendance (Requires POST)
 app.post(
   "/api/attendance",
-  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT", "SAA"] }),
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT", "SAA", "CP_HRD"] }),
   async (req, res) => {
     try {
-      const response = await fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_MEMBERSHIP_URL, {
+      const { db } = await import("./SRC/firebase.js");
+      if (db) {
+        // Save to Firestore in a collection grouped by event
+        const { event, name, email } = req.body;
+        if (event && name) {
+          const eventDocRef = db.collection("attendance").doc(event);
+          const doc = await eventDocRef.get();
+
+          let attendees = [];
+          if (doc.exists) {
+            attendees = doc.data().attendees || [];
+          }
+
+          // Prevent duplicates
+          if (!attendees.some(a => a.name === name)) {
+            attendees.push({
+              name: name,
+              email: email || "",
+              timestamp: new Date().toISOString()
+            });
+            await eventDocRef.set({
+              eventName: event,
+              attendees: attendees,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          }
+        }
+      }
+
+      // Dual-Sync to Apps Script
+      const response = await fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_ATTENDANCE_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(req.body)

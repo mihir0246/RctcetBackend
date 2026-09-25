@@ -22,13 +22,13 @@ export async function submitRegistration(eventId, registrationData) {
     // Fallback: search by eventName
     const decodedSearch = decodeURIComponent(eventId).replace(/_/g, " ").toLowerCase();
     const snapshot = await db.collection("events").get();
-    
+
     const matchedDocs = snapshot.docs.filter(d => String(d.data().eventName).toLowerCase() === decodedSearch);
     if (matchedDocs.length === 0) throw new Error("Event not found");
 
     const activeDoc = matchedDocs.find(d => d.data().isActive === true);
     const foundDoc = activeDoc || matchedDocs[0];
-    
+
     event = foundDoc.data();
     trueEventId = foundDoc.id;
   }
