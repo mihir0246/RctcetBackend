@@ -673,9 +673,9 @@ app.post(
       }
 
       // Respond to frontend immediately for blazing fast UI!
-      res.json({ 
-        status: "success", 
-        message: "Attendance logged to Firestore (syncing to sheets in background)" 
+      res.json({
+        status: "success",
+        message: "Attendance logged to Firestore (syncing to sheets in background)"
       });
 
       // Dual-Sync to Apps Script in the background (fire-and-forget)
