@@ -445,20 +445,83 @@ app.post("/api/members/register", async (req, res) => {
 // PUBLIC: Get members for attendance dropdown
 app.get("/api/attendance/members", async (req, res) => {
   try {
-    const { getAllUsers } = await import("./SRC/Roles.js");
-    const users = await getAllUsers();
+    const { db } = await import("./SRC/firebase.js");
 
-    // Group them for the frontend as homeMembers
-    const homeMembers = users.map(u => ({ name: u.name, email: u.email }));
+    // 1. Calculate Active Event
+    let activeEventStr = "";
+    const today = new Date();
+    // Convert to string format that matches Firestore (e.g. "2026-09-26")
+    const todayStr = today.toISOString().split('T')[0];
+
+    const eventsSnap = await db.collection("events").get();
+    let closestEvent = null;
+    let smallestTimeDiff = Infinity;
+
+    eventsSnap.forEach(doc => {
+      const ev = doc.data();
+      if (ev.date) {
+        // Simple logic: if event is today, it's active!
+        // We parse date, ignoring time
+        const evDate = new Date(ev.date);
+        const evDateStr = evDate.toISOString().split('T')[0];
+
+        if (evDateStr === todayStr) {
+          activeEventStr = ev.eventName;
+        } else {
+          // Fallback: find the most recent past event
+          const diff = today.getTime() - evDate.getTime();
+          if (diff > 0 && diff < smallestTimeDiff) {
+            smallestTimeDiff = diff;
+            closestEvent = ev.eventName;
+          }
+        }
+      }
+    });
+
+    if (!activeEventStr && closestEvent) {
+      activeEventStr = closestEvent;
+    }
+
+    // 2. Fetch Home Members
+    const membersSnap = await db.collection("members").get();
+    const homeMembers = membersSnap.docs.map(doc => {
+      const data = doc.data();
+      const firstName = data["First Name"] || data["Name"] || "";
+      const lastName = data["Last Name"] || "";
+      const fullName = `${firstName} ${lastName}`.trim();
+      return {
+        name: fullName,
+        email: data["Email"] || data["email"] || "",
+        phone: data["Mobile"] || data["Mobile Number"] || data["Phone"] || "",
+        department: data["Department"] || data["Branch"] || "",
+        yearOfStudy: data["Year"] || data["Year of Study"] || "",
+        division: data["Division"] || "",
+        rollNumber: data["Roll Number"] || data["Roll No"] || ""
+      };
+    });
+
+    // 3. Fetch Ambassadorials
+    const ambaSnap = await db.collection("ambassadorials").get();
+    const ambassadorials = ambaSnap.docs.map(doc => {
+      const data = doc.data();
+      return {
+        name: data.name || data.Name || "",
+        email: data.email || data.Email || "",
+        phone: data.phone || data.Phone || "",
+        college: data.college || data.College || "",
+      };
+    });
 
     res.json({
+      status: "success",
+      activeEvent: activeEventStr,
       homeMembers: homeMembers,
-      ambassadorials: [],
+      ambassadorials: ambassadorials,
       nonRotaractors: []
     });
   } catch (error) {
-    console.error("Error fetching members from Firestore:", error);
-    res.status(500).json({ error: "Failed to fetch members." });
+    console.error("Error fetching attendance members:", error);
+    res.status(500).json({ status: "error", error: "Failed to fetch members." });
   }
 });
 
