@@ -460,20 +460,27 @@ app.get("/api/attendance/members", async (req, res) => {
     eventsSnap.forEach(doc => {
       const ev = doc.data();
       if (ev.date) {
-        // Simple logic: if event is today, it's active!
-        // We parse date, ignoring time
-        const evDate = new Date(ev.date);
-        const evDateStr = evDate.toISOString().split('T')[0];
+        try {
+          // We parse date, ignoring time
+          const evDate = new Date(ev.date);
+          
+          // If the date is invalid (like "M"), skip it completely so it doesn't crash
+          if (isNaN(evDate.getTime())) return;
 
-        if (evDateStr === todayStr) {
-          activeEventStr = ev.eventName;
-        } else {
-          // Fallback: find the most recent past event
-          const diff = today.getTime() - evDate.getTime();
-          if (diff > 0 && diff < smallestTimeDiff) {
-            smallestTimeDiff = diff;
-            closestEvent = ev.eventName;
+          const evDateStr = evDate.toISOString().split('T')[0];
+          
+          if (evDateStr === todayStr) {
+            activeEventStr = ev.eventName;
+          } else {
+            // Fallback: find the most recent past event
+            const diff = today.getTime() - evDate.getTime();
+            if (diff > 0 && diff < smallestTimeDiff) {
+              smallestTimeDiff = diff;
+              closestEvent = ev.eventName;
+            }
           }
+        } catch (err) {
+          // Just silently skip any event that fails to parse
         }
       }
     });
