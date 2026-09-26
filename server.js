@@ -675,7 +675,7 @@ app.post(
       // Dual-Sync to Apps Script
       const appsScriptPayload = {
         ...req.body,
-        adminKey: process.env.VITE_ADMIN_KEY || "rcevents"
+        pin: "rctcet"
       };
 
       const response = await fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_ATTENDANCE_URL, {
