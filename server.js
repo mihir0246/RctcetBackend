@@ -672,19 +672,30 @@ app.post(
         }
       }
 
-      // Dual-Sync to Apps Script
+      // Respond to frontend immediately for blazing fast UI!
+      res.json({ 
+        status: "success", 
+        message: "Attendance logged to Firestore (syncing to sheets in background)" 
+      });
+
+      // Dual-Sync to Apps Script in the background (fire-and-forget)
       const appsScriptPayload = {
         ...req.body,
         pin: "rctcet"
       };
 
-      const response = await fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_ATTENDANCE_URL, {
+      fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_ATTENDANCE_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(appsScriptPayload)
+      }).then(r => r.json()).then(data => {
+        if (data.status !== 'success') {
+          console.error("Apps Script background sync issue:", data.message);
+        }
+      }).catch(err => {
+        console.error("Background Apps Script sync failed:", err);
       });
-      const data = await response.json();
-      res.json(data);
+
     } catch (error) {
       console.error("Error submitting attendance:", error);
       res.status(500).json({ error: "Failed to submit attendance." });
