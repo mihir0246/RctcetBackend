@@ -463,12 +463,12 @@ app.get("/api/attendance/members", async (req, res) => {
         try {
           // We parse date, ignoring time
           const evDate = new Date(ev.date);
-          
+
           // If the date is invalid (like "M"), skip it completely so it doesn't crash
           if (isNaN(evDate.getTime())) return;
 
           const evDateStr = evDate.toISOString().split('T')[0];
-          
+
           if (evDateStr === todayStr) {
             activeEventStr = ev.eventName;
           } else {
@@ -673,10 +673,15 @@ app.post(
       }
 
       // Dual-Sync to Apps Script
+      const appsScriptPayload = {
+        ...req.body,
+        adminKey: process.env.VITE_ADMIN_KEY || "rcevents"
+      };
+
       const response = await fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_ATTENDANCE_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(req.body)
+        body: JSON.stringify(appsScriptPayload)
       });
       const data = await response.json();
       res.json(data);
