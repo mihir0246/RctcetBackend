@@ -35,16 +35,27 @@ export async function getHrdReport() {
 
   // 2. Fetch ALL past events
   const todayStr = new Date().toISOString().split('T')[0];
-  const eventsSnapshot = await db.collection("events")
-    .where("date", "<=", todayStr)
-    .orderBy("date", "desc")
-    .get();
+  const eventsSnapshot = await db.collection("events").get();
 
-  const allPastEvents = eventsSnapshot.docs.map(doc => ({
-    id: doc.id,
-    eventName: doc.data().eventName,
-    date: doc.data().date
-  }));
+  let allPastEvents = [];
+  eventsSnapshot.forEach(doc => {
+    const ev = doc.data();
+    if (ev.date) {
+      const parsedTime = new Date(ev.date).getTime();
+      // Only include valid dates that happened TODAY or in the PAST
+      if (!isNaN(parsedTime) && parsedTime <= new Date(todayStr).getTime()) {
+        allPastEvents.push({
+          id: doc.id,
+          eventName: ev.eventName,
+          date: ev.date,
+          parsedTime: parsedTime
+        });
+      }
+    }
+  });
+
+  // Sort strictly by the parsed actual date, descending (most recent past event first)
+  allPastEvents.sort((a, b) => b.parsedTime - a.parsedTime);
 
   const last3Events = allPastEvents.slice(0, 3);
   const totalEventsCount = allPastEvents.length;
