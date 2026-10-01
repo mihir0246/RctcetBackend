@@ -10,11 +10,8 @@ import { db } from "./firebase.js";
 export async function getHrdReport() {
   if (!db) throw new Error("Firestore not initialized");
 
-  // 1. Fetch Core & BOD members
-  // Members collection stores Category as "Core", "BOD", etc.
-  const membersSnapshot = await db.collection("members")
-    .where("Category", "in", ["Core", "BOD"])
-    .get();
+  // 1. Fetch all members (Core, BOD, Working Committee, GBM)
+  const membersSnapshot = await db.collection("members").get();
 
   const members = membersSnapshot.docs.map(doc => {
     const data = doc.data();
@@ -28,8 +25,8 @@ export async function getHrdReport() {
       fullName: fullName,
       email: data["Email"] || data["email"] || "",
       phone: data["Mobile"] || data["Mobile Number"] || data["Phone"] || "",
-      category: data["Category"],
-      position: data["Position"],
+      category: data["Category"] || "GBM",
+      position: data["Position"] || "Member",
     };
   });
 

@@ -227,10 +227,10 @@ app.post(
 /*                           HRD DASHBOARD                                    */
 /* -------------------------------------------------------------------------- */
 
-// READ HRD Report (Restricted to CP_HRD, PRESIDENT, etc)
+// READ Attendance Log Report (Restricted to PRESIDENT, SECRETARY, SAA, CP_HRD)
 app.get(
   "/api/admin/hrd-report",
-  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT", "CP_HRD"] }),
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "SAA", "CP_HRD"] }),
   async (req, res) => {
     try {
       const reportData = await getHrdReport();
