@@ -456,9 +456,13 @@ app.get("/api/attendance/members", async (req, res) => {
     const eventsSnap = await db.collection("events").get();
     let closestEvent = null;
     let smallestTimeDiff = Infinity;
+    const allEvents = [];
 
     eventsSnap.forEach(doc => {
       const ev = doc.data();
+      if (ev.eventName) {
+        allEvents.push(ev.eventName);
+      }
       if (ev.date) {
         try {
           // We parse date, ignoring time
@@ -518,10 +522,10 @@ app.get("/api/attendance/members", async (req, res) => {
         college: data.college || data.College || "",
       };
     });
-
     res.json({
       status: "success",
       activeEvent: activeEventStr,
+      allEvents: allEvents,
       homeMembers: homeMembers,
       ambassadorials: ambassadorials,
       nonRotaractors: []
@@ -645,30 +649,28 @@ app.post(
     try {
       const { db } = await import("./SRC/firebase.js");
       if (db) {
-        // Save to Firestore in a collection grouped by event
-        const { event, name, email } = req.body;
-        if (event && name) {
+        const { event, attendees } = req.body; // Expects an array of attendee objects
+        if (event && Array.isArray(attendees) && attendees.length > 0) {
           const eventDocRef = db.collection("attendance").doc(event);
-          const doc = await eventDocRef.get();
+          const { FieldValue } = await import("firebase-admin/firestore");
 
-          let attendees = [];
-          if (doc.exists) {
-            attendees = doc.data().attendees || [];
-          }
+          // Map the frontend attendees array into the exact shape Firestore expects
+          const firestoreAttendees = attendees.map(a => ({
+            name: a.name,
+            email: a.email || "",
+            timestamp: new Date().toISOString()
+          }));
 
-          // Prevent duplicates
-          if (!attendees.some(a => a.name === name)) {
-            attendees.push({
-              name: name,
-              email: email || "",
-              timestamp: new Date().toISOString()
-            });
-            await eventDocRef.set({
-              eventName: event,
-              attendees: attendees,
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-          }
+          // Use arrayUnion to prevent Race Conditions.
+          // This mathematically appends the array without overwriting existing data.
+          await eventDocRef.set({
+            eventName: event,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          await eventDocRef.update({
+            attendees: FieldValue.arrayUnion(...firestoreAttendees)
+          });
         }
       }
 
