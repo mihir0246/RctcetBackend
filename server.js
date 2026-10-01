@@ -499,7 +499,7 @@ app.get("/api/attendance/members", async (req, res) => {
       const data = doc.data();
       const firstName = data["First Name"] || data["Name"] || "";
       const lastName = data["Last Name"] || "";
-      const fullName = `${firstName} ${lastName}`.trim();
+      const fullName = `${firstName} ${lastName}`.replace(/\s+/g, ' ').trim();
       return {
         name: fullName,
         email: data["Email"] || data["email"] || "",
