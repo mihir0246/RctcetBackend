@@ -6,6 +6,7 @@ import { db, auth as firebaseAuth } from "./SRC/firebase.js";
 
 // Database Service Modules with Dual-Sync
 import { readSaaFine, appendSaaFine, updateSaaFine, deleteSaaFine } from "./SRC/SaaFine.js";
+import { sendFineIssuedEmail, sendFineReceiptEmail } from "./SRC/mailer.js";
 import { readContactUs, appendDataContactUs } from "./SRC/ContactUs.js";
 import { readEventsDrive } from "./SRC/EventsDrive.js";
 import { appendFeedBack } from "./SRC/FeedBack.js";
@@ -111,20 +112,38 @@ app.post(
   requirePermission({ isSaaOnly: true }),
   async (req, res) => {
     try {
-      const { id, name, date, amount, reason, mail, status } = req.body;
+      const { id, name, date, baseAmount, surcharge, paymentDeadline, reason, mail, status } = req.body;
       const fineId = id || Math.floor(Math.random() * 100000);
-      const result = await appendSaaFine([
-        fineId,
+      
+      const newRecord = {
+        id: fineId,
         name,
-        date || new Date().toISOString().split("T")[0],
-        amount,
+        date: date || new Date().toISOString().split("T")[0],
+        baseAmount,
+        surcharge,
+        paymentDeadline,
         reason,
         mail,
-        status || "UNPAID",
-      ]);
+        status: status || "UNPAID",
+      };
 
-      res.json({ message: "SaaFine added successfully (Dual-Synced)", result });
+      const result = await appendSaaFine(newRecord);
+
+      // Trigger Email Notification in background
+      if (mail) {
+        sendFineIssuedEmail({
+          to: mail,
+          name,
+          baseAmount: Number(baseAmount) || 50,
+          surcharge: Number(surcharge) || 25,
+          paymentDeadline,
+          reason
+        });
+      }
+
+      res.json({ message: "SaaFine added successfully and email dispatched", result });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: "Failed to append SaaFine data." });
     }
   }
@@ -137,21 +156,45 @@ app.put(
   async (req, res) => {
     try {
       const id = req.params.id;
-      const { name, date, amount, reason, mail, status } = req.body;
-      const result = await updateSaaFine(id, [
-        id,
-        name,
-        date,
-        amount,
-        reason,
-        mail,
-        status,
-      ]);
+      const updatedValues = req.body; // { name, date, baseAmount, surcharge, paymentDeadline, reason, mail, status }
+      
+      const result = await updateSaaFine(id, updatedValues);
 
       if (!result) return res.status(404).json({ error: "SaaFine ID not found." });
       res.json({ message: "SaaFine updated successfully", result });
     } catch (err) {
+      console.error(err);
       res.status(500).json({ error: "Failed to update SaaFine data." });
+    }
+  }
+);
+
+// MARK AS PAID & SEND RECEIPT
+app.post(
+  "/api/admin/saafine/:id/pay",
+  requirePermission({ isSaaOnly: true }),
+  async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { totalPaid, mail, name, reason } = req.body;
+      
+      // Update status to PAID and save totalPaid
+      await updateSaaFine(id, { status: "PAID", totalPaid });
+
+      // Send Receipt Email
+      if (mail) {
+        sendFineReceiptEmail({
+          to: mail,
+          name,
+          reason,
+          totalPaid
+        });
+      }
+
+      res.json({ message: "Marked as paid and receipt sent" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to mark as paid." });
     }
   }
 );

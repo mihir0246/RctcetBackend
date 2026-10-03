@@ -1,11 +1,8 @@
 // SaaFine.js with Firestore (Google Sheets Sync Disabled until Apps Script upgrade)
 import { db } from "./firebase.js";
-import axios from "axios";
 import dotenv from "dotenv";
 
 dotenv.config();
-
-const spreadsheetId = process.env.SPREADSHEET_ID;
 
 // ---------- READ ----------
 async function readSaaFine() {
@@ -15,7 +12,7 @@ async function readSaaFine() {
   }
 
   try {
-    const snapshot = await db.collection("saafine").get();
+    const snapshot = await db.collection("saafine").orderBy("createdAt", "desc").get();
     if (!snapshot.empty) {
       return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     }
@@ -27,8 +24,8 @@ async function readSaaFine() {
 }
 
 // ---------- APPEND ----------
-async function appendSaaFine(newRow) {
-  const [id, name, date, amount, reason, mail, status] = newRow;
+async function appendSaaFine(newRecord) {
+  const { id, name, date, baseAmount, surcharge, paymentDeadline, reason, mail, status } = newRecord;
 
   if (!db) throw new Error("Firestore database is not initialized.");
 
@@ -36,7 +33,9 @@ async function appendSaaFine(newRow) {
     id: String(id),
     name,
     date,
-    amount,
+    baseAmount: Number(baseAmount) || 50,
+    surcharge: Number(surcharge) || 25,
+    paymentDeadline,
     reason,
     mail,
     status: status || "UNPAID",
@@ -44,31 +43,24 @@ async function appendSaaFine(newRow) {
   });
   console.log(`Firestore backup saved for SaaFine ID ${id}`);
 
-  // Dual-Sync to Google Sheets disabled as servicekey.json is removed in Phase 4
-  return { updatedCells: 7 };
+  // Dual-Sync to Google Sheets disabled as requested
+  return { updatedCells: 9 };
 }
 
 // ---------- UPDATE ----------
 async function updateSaaFine(id, updatedValues) {
-  const [idVal, name, date, amount, reason, mail, status] = updatedValues;
-
+  // Allow partial updates
   if (!db) throw new Error("Firestore database is not initialized.");
 
   await db.collection("saafine").doc(String(id)).set(
     {
-      id: String(id),
-      name,
-      date,
-      amount,
-      reason,
-      mail,
-      status,
+      ...updatedValues,
       updatedAt: new Date().toISOString(),
     },
     { merge: true }
   );
 
-  return { updatedCells: 7 };
+  return { updatedCells: 1 };
 }
 
 // ---------- DELETE ----------
