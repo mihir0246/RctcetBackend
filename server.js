@@ -14,6 +14,7 @@ import { getAllEvents, getEvent, toggleEvent, deleteEvent, createEvent, editEven
 import { getAllUsers, assignPosition } from "./SRC/Roles.js";
 import { submitRegistration, getEventCounts } from "./SRC/Registrations.js";
 import { getHrdReport } from "./SRC/HRD.js";
+import { getCache, setCache, invalidateCache, getCacheStats } from "./SRC/cache.js";
 
 dotenv.config();
 
@@ -98,7 +99,11 @@ app.get(
   requirePermission({ isSaaOnly: true }),
   async (req, res) => {
     try {
+      const cached = getCache("saafine");
+      if (cached) return res.json(cached);
+
       const data = await readSaaFine();
+      setCache("saafine", data);
       res.json(data);
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch SaaFine data." });
@@ -128,6 +133,7 @@ app.post(
       };
 
       const result = await appendSaaFine(newRecord);
+      invalidateCache("saafine");
 
       // Trigger Email Notification in background
       if (mail) {
@@ -159,6 +165,7 @@ app.put(
       const updatedValues = req.body; // { name, date, baseAmount, surcharge, paymentDeadline, reason, mail, status }
       
       const result = await updateSaaFine(id, updatedValues);
+      invalidateCache("saafine");
 
       if (!result) return res.status(404).json({ error: "SaaFine ID not found." });
       res.json({ message: "SaaFine updated successfully", result });
@@ -180,6 +187,7 @@ app.post(
       
       // Update status to PAID and save totalPaid
       await updateSaaFine(id, { status: "PAID", totalPaid });
+      invalidateCache("saafine");
 
       // Send Receipt Email
       if (mail) {
@@ -207,6 +215,7 @@ app.delete(
     try {
       const id = req.params.id;
       const result = await deleteSaaFine(id);
+      invalidateCache("saafine");
       if (!result) return res.status(404).json({ error: "SaaFine ID not found." });
       res.json({ message: "SaaFine record deleted", result });
     } catch (err) {
@@ -330,7 +339,11 @@ app.post("/addContactUs", async (req, res) => {
 // PUBLIC: Get all active, future events
 app.get("/api/events", async (req, res) => {
   try {
+    const cached = getCache("eventsPublic");
+    if (cached) return res.json(cached);
+
     const events = await getAllEvents(true);
+    setCache("eventsPublic", events);
     res.json(events);
   } catch (error) {
     console.error("Error fetching public events:", error);
@@ -358,7 +371,11 @@ app.get(
   requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
   async (req, res) => {
     try {
+      const cached = getCache("eventsAdmin");
+      if (cached) return res.json(cached);
+
       const events = await getAllEvents(false);
+      setCache("eventsAdmin", events);
       res.json(events);
     } catch (error) {
       console.error("Error fetching admin events:", error);
@@ -374,6 +391,7 @@ app.post(
   async (req, res) => {
     try {
       const result = await toggleEvent(req.params.id);
+      invalidateCache("eventsPublic", "eventsAdmin", "attendanceMembers");
       res.json(result);
     } catch (error) {
       console.error("Error toggling event:", error);
@@ -389,6 +407,7 @@ app.delete(
   async (req, res) => {
     try {
       const result = await deleteEvent(req.params.id);
+      invalidateCache("eventsPublic", "eventsAdmin", "attendanceMembers");
       res.json(result);
     } catch (error) {
       console.error("Error deleting event:", error);
@@ -403,7 +422,11 @@ app.get(
   requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
   async (req, res) => {
     try {
+      const cached = getCache("eventCounts");
+      if (cached) return res.json(cached);
+
       const counts = await getEventCounts();
+      setCache("eventCounts", counts);
       res.json(counts);
     } catch (error) {
       console.error("Error fetching event counts:", error);
@@ -419,6 +442,7 @@ app.post(
   async (req, res) => {
     try {
       const data = await createEvent(req.body);
+      invalidateCache("eventsPublic", "eventsAdmin", "attendanceMembers");
       res.json(data);
     } catch (error) {
       console.error("Error creating event:", error);
@@ -434,6 +458,7 @@ app.put(
   async (req, res) => {
     try {
       const data = await editEvent(req.params.id, req.body);
+      invalidateCache("eventsPublic", "eventsAdmin", "attendanceMembers");
       res.json(data);
     } catch (error) {
       console.error("Error editing event:", error);
@@ -446,6 +471,7 @@ app.put(
 app.post("/api/events/:id/register", async (req, res) => {
   try {
     const data = await submitRegistration(req.params.id, req.body);
+    invalidateCache("eventCounts");
     res.json(data);
   } catch (error) {
     console.error("Error submitting registration:", error);
@@ -466,6 +492,7 @@ app.post("/api/members/register", async (req, res) => {
       createdAt: new Date().toISOString()
     };
     await memberRef.set(entry);
+    invalidateCache("attendanceMembers", "membersWebRegi");
 
     // 2. Dual-sync securely to Google Sheets in background
     fetch(process.env.VITE_GOOGLE_APPS_SCRIPT_MEMBERSHIP_URL, {
@@ -485,9 +512,12 @@ app.post("/api/members/register", async (req, res) => {
 /*                         ATTENDANCE & MEMBERSHIP                            */
 /* -------------------------------------------------------------------------- */
 
-// PUBLIC: Get members for attendance dropdown
+// PUBLIC: Get members for attendance dropdown (Cached for 60 mins)
 app.get("/api/attendance/members", async (req, res) => {
   try {
+    const cached = getCache("attendanceMembers");
+    if (cached) return res.json(cached);
+
     const { db } = await import("./SRC/firebase.js");
 
     // 1. Calculate Active Event
@@ -565,21 +595,25 @@ app.get("/api/attendance/members", async (req, res) => {
         college: data.college || data.College || "",
       };
     });
-    res.json({
+
+    const responsePayload = {
       status: "success",
       activeEvent: activeEventStr,
       allEvents: allEvents,
       homeMembers: homeMembers,
       ambassadorials: ambassadorials,
       nonRotaractors: []
-    });
+    };
+
+    setCache("attendanceMembers", responsePayload);
+    res.json(responsePayload);
   } catch (error) {
     console.error("Error fetching attendance members:", error);
     res.status(500).json({ status: "error", error: "Failed to fetch members." });
   }
 });
 
-// PUBLIC: Fetch user details by name to pre-fill registration form
+// PUBLIC: Fetch user details by name to pre-fill registration form (Memory-Cached)
 app.post("/api/members/prefill", async (req, res) => {
   try {
     const { firstName, lastName, fullName } = req.body;
@@ -602,9 +636,14 @@ app.post("/api/members/prefill", async (req, res) => {
     if (!db) throw new Error("Firestore database is not initialized.");
 
     // Search in the NEW Web Registrations collection (membersWebRegi)
-    const newRegSnapshot = await db.collection("membersWebRegi").get();
-    for (const doc of newRegSnapshot.docs) {
-      const data = doc.data();
+    let newRegDocs = getCache("membersWebRegi");
+    if (!newRegDocs) {
+      const newRegSnapshot = await db.collection("membersWebRegi").get();
+      newRegDocs = newRegSnapshot.docs.map(doc => doc.data());
+      setCache("membersWebRegi", newRegDocs);
+    }
+
+    for (const data of newRegDocs) {
       const dbFirst = (data.firstName || "").toLowerCase().trim();
       const dbLast = (data.lastName || "").toLowerCase().trim();
       const dbFull = `${dbFirst} ${dbLast}`.trim();
@@ -618,10 +657,14 @@ app.post("/api/members/prefill", async (req, res) => {
     }
 
     // Search in the OLD migrated members collection (members)
-    const oldRegSnapshot = await db.collection("members").get();
-    for (const doc of oldRegSnapshot.docs) {
-      const data = doc.data();
-      // Old sheet uses "First Name" and "Last Name"
+    let oldRegDocs = getCache("membersOld");
+    if (!oldRegDocs) {
+      const oldRegSnapshot = await db.collection("members").get();
+      oldRegDocs = oldRegSnapshot.docs.map(doc => doc.data());
+      setCache("membersOld", oldRegDocs);
+    }
+
+    for (const data of oldRegDocs) {
       const oldFirst = (data["First Name"] || data["Name"] || "").toLowerCase().trim();
       const oldLast = (data["Last Name"] || "").toLowerCase().trim();
       const oldFull = `${oldFirst} ${oldLast}`.trim();
@@ -658,31 +701,43 @@ app.post("/api/members/prefill", async (req, res) => {
           fatherName: data["Full Name of Father"] || "",
           fatherAge: data["Age of Father"] || "",
           fatherOccupation: data["Occupation of Father"] || "",
+          fatherPhone: data["Mobile Number of Father"] || "",
           motherName: data["Full Name of Mother"] || "",
           motherAge: data["Age of Mother"] || "",
           motherOccupation: data["Occupation of Mother"] || "",
-          parentContact: data["Contact No.of your parent"] || "",
-          hasSiblings: data["Any Siblings?"] || "",
-          siblingCount: data["If yes, How many?"] || "",
-          rotaractYear: data["Rotaract Year"] || "",
-          hobbies: data["Any Hobbies/Skills?"] || "",
-          helpWith: data["You can help us with"] ? data["You can help us with"].split(",") : [],
-          playSports: data["Do you play any sports?"] || "",
-          sportsAchievement: data["Achievement in sports?"] || "",
-          culturalActivities: data["Cultural activities?"] ? data["Cultural activities?"].split(",") : [],
-          culturalAchievement: data["Achievement in cultural?"] || ""
+          motherPhone: data["Mobile Number of Mother"] || "",
+          hobbies: data["Hobbies"] || "",
+          talent: data["Talent/Special Skill"] || "",
+          reasonToJoin: data["Why do you wish to join Rotaract club?"] || "",
+          contribution: data["How would you contribute towards the betterment of the club?"] || "",
+          pastRotaractExperience: data["Have you been a part of Rotaract before?"] || "No",
+          pastExperienceDetails: data["If yes, which club and post?"] || "",
+          howDidYouHear: data["How did you get to know about our club?"] || ""
         };
         return res.json({ found: true, data: mappedData });
       }
     }
 
-    // No match found
     return res.json({ found: false });
   } catch (error) {
-    console.error("Error fetching prefill data:", error);
-    res.status(500).json({ error: "Failed to fetch prefill data." });
+    console.error("Error prefilling member details:", error);
+    res.status(500).json({ error: "Failed to prefill member details." });
   }
 });
+
+// ADMIN: In-Memory Cache Diagnostics and Manual Purge
+app.get("/api/admin/cache/stats", (req, res) => {
+  res.json(getCacheStats());
+});
+
+app.post(
+  "/api/admin/cache/clear",
+  requirePermission({ allowedPositions: ["PRESIDENT", "SECRETARY", "JOINT_SECRETARY", "VICE_PRESIDENT"] }),
+  (req, res) => {
+    invalidateCache();
+    res.json({ success: true, message: "All in-memory cache flushed successfully!" });
+  }
+);
 
 // ADMIN: Submit attendance (Requires POST)
 app.post(
